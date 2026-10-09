@@ -1,0 +1,77 @@
+fields @timestamp, @message
+| parse @message /^\((?<request_id>[^)]+)\)/
+| filter ispresent(request_id)
+| parse @message /HTTP Method: (?<http_method>\w+), Resource Path: (?<resource_path>\S+)/
+| parse @message /Api Key: (?<api_key>\S*)\s*Api Stage: (?<api_stage>\S+)/
+| parse @message /Status: (?<status>\d+), Time to Response Headers: (?<ttfb_ms>\d+) ms/
+| parse @message /Total Payload Bytes Received: (?<payload_bytes>\d+), Integration Latency: (?<integration_latency_ms>\d+) ms/
+| stats min(@timestamp) as request_start,
+        max(http_method) as http_method,
+        max(resource_path) as resource_path,
+        max(api_key) as api_key,
+        max(api_stage) as api_stage,
+        max(status) as status,
+        max(ttfb_ms) as time_to_response_headers_ms,
+        max(payload_bytes) as payload_bytes,
+        max(integration_latency_ms) as integration_latency_ms
+  by request_id
+| sort request_start desc
+| limit 200
+
+
+
+
+fields @timestamp, @message
+| filter @message like /HTTP Method:|Verifying Usage Plan|Received response headers|Recieved response headers|Response stream completed/
+| parse @message /^\((?<RequestId>[^)]+)\)/
+| parse @message /HTTP Method: (?<HttpMethod>[A-Z]+), Resource Path: (?<ResourcePath>[^\r\n]+)/
+| parse @message /Verifying Usage Plan for request: .*?\. Api Key: ?(?<ApiKey>.*?) Api Stage: (?<ApiStage>[^\s]+)/
+| parse @message /(?:Received|Recieved) response headers\. Status: (?<Status>\d+), Time to Response Headers: (?<ResponseHeaderMs>\d+) ms/
+| parse @message /Response stream completed\. Total Payload Bytes Received: (?<PayloadBytes>\d+), Integration Latency: (?<IntegrationLatencyMs>\d+) ms/
+| filter ispresent(RequestId)
+| stats
+    latest(@timestamp) as LastEvent,
+    latest(HttpMethod) as Method,
+    latest(ResourcePath) as ResourcePath,
+    latest(ApiKey) as ApiKey,
+    latest(ApiStage) as ApiStage,
+    latest(Status) as Status,
+    max(ResponseHeaderMs) as ResponseHeaderMs,
+    max(PayloadBytes) as PayloadBytes,
+    max(IntegrationLatencyMs) as IntegrationLatencyMs
+  by RequestId
+| sort LastEvent desc
+| limit 100
+
+
+
+
+fields @timestamp, @message
+# 1. Extract request_id from the beginning of each line
+| parse @message "(*) *" as requestId, logPayload
+
+# 2. Extract Method and Resource Path
+| parse logPayload "HTTP Method: *, Resource Path: *" as httpMethod, resourcePath
+
+# 3. Extract API Key and Stage
+| parse logPayload "Verifying Usage Plan for request: *. Api Key: *. Api Stage: *" as usageReqId, apiKey, apiStage
+
+# 4. Extract Status Code and Time to Response Headers
+| parse logPayload "Received response headers. Status: *, Time to Response Headers: * ms" as statusCode, responseHeaderTimeMs
+
+# 5. Extract Payload Size and Integration Latency
+| parse logPayload "Response stream completed. Total Payload Bytes Received: *, Integration Latency: * ms" as payloadBytes, integrationLatencyMs
+
+# 6. Aggregate fields across all log events for each request
+| stats 
+    latest(httpMethod) as method,
+    latest(resourcePath) as path,
+    latest(apiKey) as key,
+    latest(apiStage) as stage,
+    latest(statusCode) as status,
+    latest(responseHeaderTimeMs) as timeToHeadersMs,
+    latest(payloadBytes) as bytesReceived,
+    latest(integrationLatencyMs) as latencyMs
+  by requestId
+| filter ispresent(method) or ispresent(status)
+| sort latencyMs desc
