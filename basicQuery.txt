@@ -201,3 +201,42 @@ fields @timestamp, @message
           method, path, api_key_val, stage,
           status_max, time_to_response_headers_max, payload_bytes_max, integration_latency_ms_max
 | limit 200
+
+
+#adjusting more friendly column names. also more logic to show if buffered route instead of leaving some fields blank if buffered as opposed to streaming.
+fields @timestamp, @message
+| parse @message /^\((?<reqid>[^)]+)\)/
+| filter ispresent(reqid)
+| parse @message /HTTP Method: (?<raw_method>\w+), Resource Path: (?<raw_path>\S+)/
+| parse @message /(?i)Api Stage: (?<raw_stage>\S+)/
+| parse @message /(?i)Api Key: (?<raw_key>\S+) Api Stage:/
+| parse @message /(?i)Received response.*?Status: (?<raw_status>\d+)/
+| parse @message /(?i)Time to Response Headers: (?<raw_ttfb>\d+) ms/
+| parse @message /(?i)Total Payload Bytes Rec[ei]+ved: (?<raw_payload>\d+)/
+| parse @message /(?i)Integration latency: (?<raw_latency>\d+) ms/
+| parse @message /(?<unauth_msg>Unauthorized request)/
+| parse @message /(?<authorizer_msg>Starting authorizer)/
+| stats min(@timestamp) as request_time,
+        earliest(raw_method) as http_method,
+        earliest(raw_path) as resource_path,
+        earliest(raw_key) as api_key,
+        earliest(raw_stage) as api_stage,
+        max(raw_status) as status_code,
+        max(raw_ttfb) as ttfb_num,
+        max(raw_payload) as payload_num,
+        max(raw_latency) as integration_latency_ms,
+        count(raw_ttfb) as stream_lines,
+        count(raw_latency) as latency_lines,
+        count(unauth_msg) as unauth_count,
+        count(authorizer_msg) as authorizer_runs
+  by reqid
+| fields if(unauth_count > 0, "yes", "no") as unauthorized,
+         if(authorizer_runs > 0, "yes", "no") as authorizer_invoked,
+         if(stream_lines > 0, "streaming", if(latency_lines > 0, "buffered", "none")) as integration_type
+| fields if(integration_type = "buffered", "buffered", payload_num) as payload_bytes,
+         if(integration_type = "buffered", "buffered", ttfb_num) as time_to_headers_ms
+| sort request_time desc
+| display request_time, reqid, unauthorized, authorizer_invoked, integration_type,
+          http_method, resource_path, api_key, api_stage,
+          status_code, time_to_headers_ms, payload_bytes, integration_latency_ms
+| limit 200
