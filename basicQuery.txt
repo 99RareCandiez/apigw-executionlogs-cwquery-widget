@@ -165,3 +165,39 @@ fields @timestamp, @message
           method, path, api_key_val, stage,
           status_max, time_to_response_headers_max, payload_bytes_max, integration_latency_ms_max
 | limit 200
+
+#correctly account for buffered vs streamed routes since the log entries slightly differ
+fields @timestamp, @message
+| parse @message /^\((?<reqid>[^)]+)\)/
+| filter ispresent(reqid)
+| parse @message /HTTP Method: (?<http_method>\w+), Resource Path: (?<resource_path>\S+)/
+| parse @message /(?i)Api Stage: (?<api_stage>\S+)/
+| parse @message /(?i)Api Key: (?<api_key>\S+) Api Stage:/
+| parse @message /(?i)Received response.*?Status: (?<status>\d+)/
+| parse @message /(?i)Time to Response Headers: (?<ttfb_ms>\d+) ms/
+| parse @message /(?i)Total Payload Bytes Rec[ei]+ved: (?<payload_bytes>\d+)/
+| parse @message /(?i)Integration latency: (?<integration_latency_ms>\d+) ms/
+| parse @message /(?<unauth_msg>Unauthorized request)/
+| parse @message /(?<authorizer_msg>Starting authorizer)/
+| stats min(@timestamp) as request_start,
+        earliest(http_method) as method,
+        earliest(resource_path) as path,
+        earliest(api_key) as api_key_val,
+        earliest(api_stage) as stage,
+        max(status) as status_max,
+        max(ttfb_ms) as time_to_response_headers_max,
+        max(payload_bytes) as payload_bytes_max,
+        max(integration_latency_ms) as integration_latency_ms_max,
+        count(ttfb_ms) as stream_lines,
+        count(integration_latency_ms) as latency_lines,
+        count(unauth_msg) as unauth_count,
+        count(authorizer_msg) as authorizer_runs
+  by reqid
+| fields if(unauth_count > 0, "yes", "no") as unauthorized,
+         if(authorizer_runs > 0, "yes", "no") as authorizer_invoked,
+         if(stream_lines > 0, "streaming", if(latency_lines > 0, "buffered", "none")) as integration_type
+| sort request_start desc
+| display request_start, reqid, unauthorized, authorizer_invoked, integration_type,
+          method, path, api_key_val, stage,
+          status_max, time_to_response_headers_max, payload_bytes_max, integration_latency_ms_max
+| limit 200
