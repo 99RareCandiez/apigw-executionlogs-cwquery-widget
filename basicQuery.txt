@@ -75,3 +75,28 @@ fields @timestamp, @message
   by requestId
 | filter ispresent(method) or ispresent(status)
 | sort latencyMs desc
+
+
+
+
+#troubleshooting some blank method,path and always blank apices and stage
+fields @timestamp, @message
+| parse @message /^\((?<request_id>[^)]+)\)/
+| filter ispresent(request_id)
+| parse @message /HTTP Method: (?<http_method>\w+), Resource Path: (?<resource_path>\S+)/
+| parse @message /Api Stage: (?<api_stage>\S+)/
+| parse @message /Api Key: (?<api_key>\S+) Api Stage:/
+| parse @message /Status: (?<status>\d+), Time to Response Headers: (?<ttfb_ms>\d+) ms/
+| parse @message /Total Payload Bytes Received: (?<payload_bytes>\d+), Integration Latency: (?<integration_latency_ms>\d+) ms/
+| stats min(@timestamp) as request_start,
+        earliest(http_method) as method,
+        earliest(resource_path) as path,
+        earliest(api_key) as api_key_val,
+        earliest(api_stage) as stage,
+        max(status) as status_max,
+        max(ttfb_ms) as time_to_response_headers_max,
+        max(payload_bytes) as payload_bytes_max,
+        max(integration_latency_ms) as integration_latency_ms_max
+  by request_id
+| sort request_start desc
+| limit 200
