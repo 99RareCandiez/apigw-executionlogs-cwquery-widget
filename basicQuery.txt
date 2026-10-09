@@ -276,3 +276,48 @@ fields @timestamp, @message
           http_method, resource_path, api_key, api_stage,
           status_code, time_to_headers_ms, payload_bytes, integration_latency_ms
 | limit 200
+
+
+
+#ading clientid info for better visualizing
+fields @timestamp, @message
+| parse @message /^\((?<reqid>[^)]+)\)/
+| filter ispresent(reqid)
+| parse @message /"principalId"\s*:\s*"(?<raw_client_id>[^"]+)"/
+| parse @message /"scopes"\s*:\s*"?(?<raw_scopes>[^"}]*)/
+| parse @message /"client_organizationCode"\s*:\s*"?(?<raw_org>[^",}]*)/
+| parse @message /HTTP Method: (?<raw_method>\w+), Resource Path: (?<raw_path>\S+)/
+| parse @message /(?i)Api Stage: (?<raw_stage>\S+)/
+| parse @message /(?i)Api Key: (?<raw_key>\S+) Api Stage:/
+| parse @message /(?i)Received response.*?Status: (?<raw_status>\d+)/
+| parse @message /(?i)Time to Response Headers: (?<raw_ttfb>\d+) ms/
+| parse @message /(?i)Total Payload Bytes Rec[ei]+ved: (?<raw_payload>\d+)/
+| parse @message /(?i)Integration latency: (?<raw_latency>\d+) ms/
+| parse @message /(?<unauth_msg>Unauthorized request)/
+| parse @message /(?<authorizer_msg>Starting authorizer)/
+| stats min(@timestamp) as request_time,
+        earliest(raw_client_id) as client_id,
+        earliest(raw_scopes) as scopes,
+        earliest(raw_org) as organization_code,
+        earliest(raw_method) as http_method,
+        earliest(raw_path) as resource_path,
+        earliest(raw_key) as api_key,
+        earliest(raw_stage) as api_stage,
+        max(raw_status) as status_code,
+        earliest(raw_ttfb) as time_to_headers_ms,
+        earliest(raw_payload) as payload_bytes,
+        max(raw_latency) as integration_latency_ms,
+        count(raw_ttfb) as stream_lines,
+        count(raw_latency) as latency_lines,
+        count(unauth_msg) as unauth_count,
+        count(authorizer_msg) as authorizer_runs
+  by reqid
+| fields if(unauth_count > 0, "yes", "no") as unauthorized,
+         if(authorizer_runs > 0, "yes", "no") as authorizer_invoked,
+         if(stream_lines > 0, "streaming", if(latency_lines > 0, "buffered", "none")) as integration_type
+| sort request_time desc
+| display request_time, reqid, client_id, organization_code, scopes,
+          unauthorized, authorizer_invoked, integration_type,
+          http_method, resource_path, api_key, api_stage,
+          status_code, time_to_headers_ms, payload_bytes, integration_latency_ms
+| limit 200
