@@ -222,8 +222,8 @@ fields @timestamp, @message
         earliest(raw_key) as api_key,
         earliest(raw_stage) as api_stage,
         max(raw_status) as status_code,
-        max(raw_ttfb) as ttfb_num,
-        max(raw_payload) as payload_num,
+        earliest(raw_ttfb) as ttfb_text,
+        earliest(raw_payload) as payload_text,
         max(raw_latency) as integration_latency_ms,
         count(raw_ttfb) as stream_lines,
         count(raw_latency) as latency_lines,
@@ -233,8 +233,8 @@ fields @timestamp, @message
 | fields if(unauth_count > 0, "yes", "no") as unauthorized,
          if(authorizer_runs > 0, "yes", "no") as authorizer_invoked,
          if(stream_lines > 0, "streaming", if(latency_lines > 0, "buffered", "none")) as integration_type
-| fields if(integration_type = "buffered", "buffered", payload_num) as payload_bytes,
-         if(integration_type = "buffered", "buffered", ttfb_num) as time_to_headers_ms
+| fields if(integration_type = "buffered", "buffered", payload_text) as payload_bytes,
+         if(integration_type = "buffered", "buffered", ttfb_text) as time_to_headers_ms
 | sort request_time desc
 | display request_time, reqid, unauthorized, authorizer_invoked, integration_type,
           http_method, resource_path, api_key, api_stage,
